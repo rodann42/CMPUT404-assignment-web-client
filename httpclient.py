@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # coding: utf-8
 # Copyright 2016 Abram Hindle, https://github.com/tywtyw2002, and https://github.com/treedust
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -33,27 +33,63 @@ class HTTPResponse(object):
         self.body = body
 
 class HTTPClient(object):
-    #def get_host_port(self,url):
 
     def connect(self, host, port):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((host, port))
-        return None
+
 
     def get_code(self, data):
-        return None
+        # status code is the second object in http response
+        return int(data.split()[1])
 
     def get_headers(self,data):
-        return None
+        # request header ends with \r\n
+        return data.split('\r\n\r\n')[0]
 
     def get_body(self, data):
-        return None
-    
+        return data.split('\r\n\r\n')[-1]
+
     def sendall(self, data):
         self.socket.sendall(data.encode('utf-8'))
-        
+
     def close(self):
         self.socket.close()
+
+    def build_request(self, method, parsed, args=None):
+        """Build Http request.
+        Parameters:
+            method -> A string indicating the HTTP/1.1 method used
+            parsed -> Parsed url
+            args(optional) -> A dictionary to url encode in the body
+                of the request.
+
+        Returns: HTTPRequest Object
+        """
+        if args:
+            query = urllib.parse.urlencode(args)
+            length = max(len(query), 8)
+        else:
+            query = ''
+            length = 9
+
+        if parsed.path == '':
+            path = '/'
+        else:
+            path = parsed.path
+
+        if method == 'GET':
+            req = '''GET {} HTTP/1.1\r\nAccept-Encoding: identity\r
+Host: {}\r\nUser-Agent: Python-urllib/3.7\r\nConnection: close\r\n\r\n'''.format(path, parsed.hostname)
+
+        elif method == 'POST':
+            req = '''POST {} HTTP/1.1\r\nAccept-Encoding: identity\r
+Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r
+Host: {}\r\nUser-Agent: Python-urllib/3.7\r\nConnection: close\r\n\r\n{}'''.format(
+            path, length, parsed.hostname, query
+        )
+
+        return req
 
     # read everything from the socket
     def recvall(self, sock):
@@ -68,21 +104,62 @@ class HTTPClient(object):
         return buffer.decode('utf-8')
 
     def GET(self, url, args=None):
-        code = 500
-        body = ""
+        """Basic GET request.
+        Parameters:
+            url -> A string of the target resorce. ie. "http://www.cs.ualberta.ca/"
+            args(optional) -> A dictionary to url encode in the body
+                of the request.
+        Returns: HTTPRequest Object
+        """
+        parsed = urllib.parse.urlparse(url)
+
+        if parsed.port is None:
+            port = 80
+        else:
+            port = parsed.port
+
+        self.connect(parsed.hostname, port)
+        req = self.build_request('GET', parsed)
+        self.sendall(req)
+
+        response = self.recvall(self.socket)
+
+        code = self.get_code(response)
+        body = self.get_body(response)
+
+        self.close()
         return HTTPResponse(code, body)
 
     def POST(self, url, args=None):
-        code = 500
-        body = ""
+
+        parsed = urllib.parse.urlparse(url)
+
+        if parsed.port is None:
+            port = 80
+        else:
+            port = parsed.port
+
+        self.connect(parsed.hostname, port)
+
+        req = self.build_request('POST', parsed, args)
+
+        self.sendall(req)
+
+        response = self.recvall(self.socket)
+
+        code = self.get_code(response)
+        body = self.get_body(response)
+
+        self.close()
         return HTTPResponse(code, body)
+
 
     def command(self, url, command="GET", args=None):
         if (command == "POST"):
             return self.POST( url, args )
         else:
             return self.GET( url, args )
-    
+
 if __name__ == "__main__":
     client = HTTPClient()
     command = "GET"
